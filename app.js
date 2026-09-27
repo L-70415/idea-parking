@@ -203,6 +203,51 @@ exportBtn.addEventListener('click', () => {
   URL.revokeObjectURL(url);
 });
 
+// ========== PWA 安装支持 ==========
+let deferredPrompt = null;
+const installBtn = document.getElementById('installBtn');
+const installHint = document.getElementById('installHint');
+const closeHint = document.getElementById('closeInstallHint');
+
+// Chrome 会在页面加载后触发这个事件（如果站点满足安装条件）
+window.addEventListener('beforeinstallprompt', (e) => {
+  console.log('✅ beforeinstallprompt 触发了！站点可安装。');
+  e.preventDefault();
+  deferredPrompt = e;
+  installBtn.classList.remove('hidden');
+});
+
+// 手动触发安装
+installBtn.addEventListener('click', async () => {
+  if (!deferredPrompt) {
+    // Chrome 没触发 beforeinstallprompt，说明自动检测有问题
+    // 显示提示让用户手动点菜单
+    installHint.classList.remove('hidden');
+    return;
+  }
+  deferredPrompt.prompt();
+  const { outcome } = await deferredPrompt.userChoice;
+  console.log(`安装选择: ${outcome}`);
+  deferredPrompt = null;
+  installBtn.classList.add('hidden');
+});
+
+closeHint.addEventListener('click', () => {
+  installHint.classList.add('hidden');
+});
+
+// 安装成功后隐藏按钮
+window.addEventListener('appinstalled', () => {
+  console.log('🎉 App 安装成功！');
+  installBtn.classList.add('hidden');
+});
+
 // ========== 启动 ==========
 render();
 input.focus();
+
+// 调试日志（看控制台能知道Chrome满不满足安装条件）
+console.log('PWA 调试:');
+console.log('  manifest:', document.querySelector('link[rel=manifest]')?.href || '❌ 没找到');
+console.log('  SW支持:', 'serviceWorker' in navigator ? '✅' : '❌');
+console.log('  standalone 模式:', window.matchMedia('(display-mode: standalone)').matches ? '✅ (已安装运行)' : '❌ (浏览器模式)');
