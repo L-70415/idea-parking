@@ -1,12 +1,13 @@
 {
-  "name": "想法停车场",
-  "short_name": "想法",
+  "name": "Idea Parking",
+  "short_name": "IdeaPark",
   "description": "让想法从消耗品变成积累品",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "background_color": "#1a1a2e",
   "theme_color": "#16213e",
+  "orientation": "portrait",
   "icons": [
     {
       "src": "icons/icon-192.png",
