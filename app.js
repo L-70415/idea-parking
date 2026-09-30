@@ -72,7 +72,8 @@ parkBtn.addEventListener('click', parkIdea);
 
 // ========== 关联选择 ==========
 function showLinkZone() {
-  const recent = ideas.slice(-15).reverse().filter(i => i.id !== pendingIdea.id);
+  // 显示全部已有想法，让用户自己选（去掉数量限制）
+  const recent = ideas.slice().reverse().filter(i => i.id !== pendingIdea.id);
 
   if (recent.length === 0) {
     // 还没别的想法，跳过关联
@@ -193,61 +194,35 @@ exportBtn.addEventListener('click', () => {
   if (ideas.length === 0) { alert('还没想法可以导出'); return; }
 
   const data = JSON.stringify(ideas, null, 2);
+  const now = new Date();
+  const filename = `想法停车场_${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}.json`;
+
+  // 尝试标准下载方式
   const blob = new Blob([data], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  const now = new Date();
-  a.download = `想法停车场_${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}.json`;
+  a.download = filename;
+  a.style.display = 'none';
+  document.body.appendChild(a);
   a.click();
+  document.body.removeChild(a);
   URL.revokeObjectURL(url);
-});
 
-// ========== PWA 安装支持 ==========
-let deferredPrompt = null;
-const installBtn = document.getElementById('installBtn');
-const installHint = document.getElementById('installHint');
-const closeHint = document.getElementById('closeInstallHint');
-
-// Chrome 会在页面加载后触发这个事件（如果站点满足安装条件）
-window.addEventListener('beforeinstallprompt', (e) => {
-  console.log('✅ beforeinstallprompt 触发了！站点可安装。');
-  e.preventDefault();
-  deferredPrompt = e;
-  installBtn.classList.remove('hidden');
-});
-
-// 手动触发安装
-installBtn.addEventListener('click', async () => {
-  if (!deferredPrompt) {
-    // Chrome 没触发 beforeinstallprompt，说明自动检测有问题
-    // 显示提示让用户手动点菜单
-    installHint.classList.remove('hidden');
-    return;
-  }
-  deferredPrompt.prompt();
-  const { outcome } = await deferredPrompt.userChoice;
-  console.log(`安装选择: ${outcome}`);
-  deferredPrompt = null;
-  installBtn.classList.add('hidden');
-});
-
-closeHint.addEventListener('click', () => {
-  installHint.classList.add('hidden');
-});
-
-// 安装成功后隐藏按钮
-window.addEventListener('appinstalled', () => {
-  console.log('🎉 App 安装成功！');
-  installBtn.classList.add('hidden');
+  // 保险：同时显示内容让用户能手动复制（WebView 里 a.click 可能被拦截）
+  setTimeout(() => {
+    if (!confirm('下载已触发。如果没自动下载文件，点"确定"会显示内容让你复制到文件里。')) return;
+    const ta = document.createElement('textarea');
+    ta.value = `// 文件名：${filename}\n\n${data}`;
+    ta.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;z-index:9999;background:white;color:black;padding:10px;font-size:12px;';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    alert('已复制到剪贴板！粘贴到任意文件（比如 .txt）保存即可。');
+    document.body.removeChild(ta);
+  }, 500);
 });
 
 // ========== 启动 ==========
 render();
 input.focus();
-
-// 调试日志（看控制台能知道Chrome满不满足安装条件）
-console.log('PWA 调试:');
-console.log('  manifest:', document.querySelector('link[rel=manifest]')?.href || '❌ 没找到');
-console.log('  SW支持:', 'serviceWorker' in navigator ? '✅' : '❌');
-console.log('  standalone 模式:', window.matchMedia('(display-mode: standalone)').matches ? '✅ (已安装运行)' : '❌ (浏览器模式)');
