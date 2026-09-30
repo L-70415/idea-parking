@@ -15,7 +15,62 @@ function saveIdeas(ideas) {
 // ========== 状态 ==========
 let ideas = loadIdeas();
 let pendingIdea = null;
-let selectedLinks = new Set(); // 关联选择区已勾选的 id
+
+// ========== 图论：连通分量 ==========
+// 把想法看作节点、关联看作边，自动算出"谁和谁一伙"
+function computeClusters(allIdeas) {
+  const idSet = new Set(allIdeas.map(i => i.id));
+  // 构建双向邻接表
+  const graph = new Map();
+  allIdeas.forEach(i => graph.set(i.id, []));
+  allIdeas.forEach(i => {
+    (i.links || []).forEach(lid => {
+      if (idSet.has(lid)) {
+        graph.get(i.id).push(lid);
+        graph.get(lid)?.push(i.id);
+      }
+    });
+  });
+
+  const visited = new Set();
+  const clusters = [];
+
+  allIdeas.forEach(i => {
+    if (visited.has(i.id)) return;
+    // BFS 找这个点所在的整个连通分量
+    const queue = [i.id];
+    visited.add(i.id);
+    const cluster = [];
+    while (queue.length) {
+      const cur = queue.shift();
+      const idea = allIdeas.find(x => x.id === cur);
+      if (idea) cluster.push(idea);
+      (graph.get(cur) || []).forEach(nb => {
+        if (!visited.has(nb)) { visited.add(nb); queue.push(nb); }
+      });
+    }
+    clusters.push(cluster);
+  });
+
+  // 每个簇内部：关联最多的（簇中心）放最前，其他按时间新到旧
+  clusters.forEach(c => {
+    c.sort((a, b) => {
+      const da = (a.links || []).length;
+      const db = (b.links || []).length;
+      if (db !== da) return db - da;
+      return b.id - a.id;
+    });
+  });
+
+  // 单个想法（没关联）也自成一组
+  const singletonIds = new Set();
+  clusters.forEach(c => c.forEach(i => singletonIds.add(i.id)));
+  const result = clusters.slice();
+  allIdeas.forEach(i => {
+    if (!singletonIds.has(i.id)) result.push([i]);
+  });
+  return result;
+}
 
 // ========== DOM ==========
 const input = document.getElementById('ideaInput');
@@ -74,133 +129,55 @@ input.addEventListener('keydown', (e) => {
 });
 parkBtn.addEventListener('click', parkIdea);
 
-// ========== 关联选择（带自动簇） ==========
+// ========== 关联选择（按组分好的，直接选） ==========
 function showLinkZone() {
-  selectedLinks = new Set();
-  const all = ideas.slice().reverse().filter(i => i.id !== pendingIdea.id);
-
-  if (all.length === 0) {
+  if (ideas.length <= 1) {
     hideLinkZone();
     return;
   }
 
-  renderLinkOptions();
-  linkZone.classList.remove('hidden');
-  linkZone.scrollIntoView({ behavior: 'smooth', block: 'start' });
-}
-
-// 根据已勾选的，推导出"同一方向"的想法
-function computeCluster() {
-  // 收集 selectedLinks 里每个 id 的正向和反向关联
-  // 正向：A.links 里有 B
-  // 反向：C.links 里有 A
-  const cluster = new Set();
-
-  selectedLinks.forEach(id => {
-    const idea = ideas.find(i => i.id === id);
-    if (!idea) return;
-    // 正向：这个想法关联了谁
-    (idea.links || []).forEach(lid => {
-      if (!selectedLinks.has(lid)) cluster.add(lid);
-    });
-    // 反向：谁关联了这个想法
-    ideas.forEach(i => {
-      if (i.links && i.links.includes(id) && !selectedLinks.has(i.id)) {
-        cluster.add(i.id);
-      }
-    });
-  });
-
-  return cluster;
-}
-
-function renderLinkOptions() {
-  const all = ideas.slice().reverse().filter(i => i.id !== pendingIdea.id);
-  const cluster = computeCluster();
-
-  // 计算"同一方向"组的分数：和已勾选项有多少项直接相关
-  const clusterScores = new Map();
-  cluster.forEach(cid => {
-    const target = ideas.find(i => i.id === cid);
-    if (!target) return;
-    let score = 0;
-    selectedLinks.forEach(sid => {
-      const src = ideas.find(i => i.id === sid);
-      if (!src) return;
-      // src 正向关联 cid？
-      if ((src.links || []).includes(cid)) score++;
-      // cid 正向关联 src？
-      if ((target.links || []).includes(sid)) score++;
-    });
-    clusterScores.set(cid, score);
-  });
-
-  // 同一方向组：按分数降序
-  const clusterItems = all.filter(i => cluster.has(i.id))
-    .sort((a, b) => (clusterScores.get(b.id) || 0) - (clusterScores.get(a.id) || 0));
-
-  // 其他组：剩下的
-  const otherItems = all.filter(i => !cluster.has(i.id) && !selectedLinks.has(i.id));
+  const others = ideas.filter(i => i.id !== pendingIdea.id);
+  const clusters = computeClusters(others);
 
   linkList.innerHTML = '';
 
-  // 已勾选的（固定在最顶部显示）
-  const selectedArr = all.filter(i => selectedLinks.has(i.id));
-  if (selectedArr.length > 0) {
+  clusters.forEach(c => {
     const grp = document.createElement('div');
     grp.className = 'link-group';
-    grp.innerHTML = `<div class="link-group-title">✅ 已选 <span class="count-tag">${selectedArr.length}</span></div>`;
-    selectedArr.forEach(item => grp.appendChild(makeLinkOption(item, true, false)));
-    linkList.appendChild(grp);
-  }
+    // 组标题：用簇中心的内容前15字 + 成员数
+    const head = c[0];
+    const hint = head.content.slice(0, 15) + (head.content.length > 15 ? '…' : '');
+    grp.innerHTML = `<div class="link-group-title">🏷️ ${escapeHtml(hint)} <span class="count-tag">${c.length}</span></div>`;
 
-  // 同一方向组
-  if (clusterItems.length > 0) {
-    const grp = document.createElement('div');
-    grp.className = 'link-group';
-    grp.innerHTML = `<div class="link-group-title">🔗 同一方向的 <span class="count-tag">${clusterItems.length}</span></div>`;
-    clusterItems.forEach(item => grp.appendChild(makeLinkOption(item, false, true)));
-    linkList.appendChild(grp);
-  }
+    c.forEach(item => {
+      const div = document.createElement('div');
+      div.className = 'link-option';
+      div.innerHTML = `
+        <input type="checkbox" value="${item.id}" id="lk_${item.id}">
+        <label for="lk_${item.id}" class="link-text">#${item.id} · ${escapeHtml(item.content)}</label>
+      `;
+      grp.appendChild(div);
+    });
 
-  // 其他
-  if (otherItems.length > 0) {
-    const grp = document.createElement('div');
-    grp.className = 'link-group';
-    grp.innerHTML = `<div class="link-group-title">📋 其他 <span class="count-tag">${otherItems.length}</span></div>`;
-    otherItems.forEach(item => grp.appendChild(makeLinkOption(item, false, false)));
     linkList.appendChild(grp);
-  }
-}
-
-function makeLinkOption(item, isSelected, isCluster) {
-  const div = document.createElement('div');
-  div.className = 'link-option' + (isSelected ? ' selected' : '') + (isCluster ? ' same-cluster' : '');
-  div.innerHTML = `
-    <input type="checkbox" value="${item.id}" id="lk_${item.id}" ${isSelected ? 'checked' : ''}>
-    <label for="lk_${item.id}" class="link-text">#${item.id} · ${escapeHtml(item.content)}</label>
-  `;
-  const cb = div.querySelector('input');
-  cb.addEventListener('change', () => {
-    if (cb.checked) selectedLinks.add(item.id);
-    else selectedLinks.delete(item.id);
-    renderLinkOptions(); // 重绘，让自动簇实时更新
   });
-  return div;
+
+  linkZone.classList.remove('hidden');
+  linkZone.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function hideLinkZone() {
   linkZone.classList.add('hidden');
   pendingIdea = null;
-  selectedLinks.clear();
   input.focus();
 }
 
 confirmLink.addEventListener('click', () => {
   if (!pendingIdea) return;
+  const selected = [...linkList.querySelectorAll('input:checked')].map(cb => Number(cb.value));
   const idea = ideas.find(i => i.id === pendingIdea.id);
   if (idea) {
-    idea.links = [...selectedLinks];
+    idea.links = selected;
     saveIdeas(ideas);
   }
   hideLinkZone();
@@ -209,7 +186,7 @@ confirmLink.addEventListener('click', () => {
 
 skipLink.addEventListener('click', hideLinkZone);
 
-// ========== 浮层（查看完整想法） ==========
+// ========== 浮层 ==========
 function openDetail(id) {
   const idea = ideas.find(i => i.id === id);
   if (!idea) return;
@@ -218,7 +195,6 @@ function openDetail(id) {
   detailId.textContent = `#${id}`;
   detailContent.textContent = idea.content;
 
-  // 双向关联
   const forward = (idea.links || []).map(lid => ideas.find(i => i.id === lid)).filter(Boolean);
   const backward = ideas.filter(i => i.links && i.links.includes(id));
 
@@ -227,23 +203,27 @@ function openDetail(id) {
   } else {
     let html = '';
     if (forward.length) {
-      html += `<div>它关联了 →</div><div class="links-row">`;
+      html += `<div style="font-size:11px;color:#7a7a8a;margin-bottom:4px;">↓ 它关联了这些（完整内容）</div>`;
       forward.forEach(t => {
-        html += `<span class="tag" data-id="${t.id}">#${t.id} ${escapeHtml(t.content.slice(0,20))}</span>`;
+        html += `<div class="link-detail-item" data-id="${t.id}">
+          <div class="link-detail-id">#${t.id}</div>
+          <div class="link-detail-content">${escapeHtml(t.content)}</div>
+        </div>`;
       });
-      html += `</div>`;
     }
     if (backward.length) {
-      html += `<div style="margin-top:6px;">被这些关联 ←</div><div class="links-row">`;
+      html += `<div style="font-size:11px;color:#7a7a8a;margin:10px 0 4px;">↑ 这些关联了它</div>`;
       backward.forEach(t => {
-        html += `<span class="tag" data-id="${t.id}">#${t.id} ${escapeHtml(t.content.slice(0,20))}</span>`;
+        html += `<div class="link-detail-item" data-id="${t.id}">
+          <div class="link-detail-id">#${t.id}</div>
+          <div class="link-detail-content">${escapeHtml(t.content)}</div>
+        </div>`;
       });
-      html += `</div>`;
     }
     detailLinks.innerHTML = html;
-    // 浮层里的 tag 也能点击继续跳转
-    detailLinks.querySelectorAll('.tag').forEach(t => {
-      t.addEventListener('click', () => openDetail(Number(t.dataset.id)));
+    detailLinks.querySelectorAll('.link-detail-item').forEach(el => {
+      el.style.cursor = 'pointer';
+      el.addEventListener('click', () => openDetail(Number(el.dataset.id)));
     });
   }
 
@@ -262,7 +242,6 @@ detailModal.addEventListener('click', (e) => { if (e.target === detailModal) clo
 modalJump.addEventListener('click', () => {
   if (!modalCurrentId) return;
   closeDetail();
-  // 滚到那条想法
   setTimeout(() => {
     const target = ideaList.querySelector(`.idea-item[data-id="${modalCurrentId}"]`);
     if (target) {
@@ -273,46 +252,36 @@ modalJump.addEventListener('click', () => {
   }, 100);
 });
 
-// ========== 渲染列表 ==========
+// ========== 渲染列表（按组分好） ==========
 function render() {
-  const sorted = [...ideas].sort((a, b) => b.id - a.id);
   countEl.textContent = `${ideas.length} 条`;
 
-  if (sorted.length === 0) {
+  if (ideas.length === 0) {
     ideaList.innerHTML = '';
     emptyTip.classList.remove('hidden');
     return;
   }
   emptyTip.classList.add('hidden');
 
-  ideaList.innerHTML = sorted.map(item => {
-    const time = new Date(item.time);
-    const timeStr = `${time.getMonth()+1}/${time.getDate()} ${String(time.getHours()).padStart(2,'0')}:${String(time.getMinutes()).padStart(2,'0')}`;
+  const clusters = computeClusters(ideas);
 
-    let linkTags = '';
-    if (item.links && item.links.length) {
-      linkTags = `<div class="links">` +
-        item.links.map(lid => {
-          const target = ideas.find(i => i.id === lid);
-          const preview = target ? target.content.slice(0, 15) + (target.content.length > 15 ? '…' : '') : '#已删除';
-          return `<span class="tag" data-id="${item.id}" data-target="${lid}">→ #${lid} ${preview}</span>`;
-        }).join('') +
-        `</div>`;
-    }
-
+  ideaList.innerHTML = clusters.map((c, ci) => {
+    const head = c[0];
+    const hint = head.content.slice(0, 15) + (head.content.length > 15 ? '…' : '');
+    const groupHtml = c.map(item => renderIdeaItem(item)).join('');
     return `
-      <div class="idea-item" data-id="${item.id}">
-        <div class="content">${escapeHtml(item.content)}</div>
-        ${linkTags}
-        <div class="meta">
-          <span>${timeStr} · #${item.id}</span>
-          <button class="delete" data-id="${item.id}">删除</button>
+      <div class="idea-group">
+        <div class="group-header" data-group="${ci}">
+          <span class="group-icon">🚗</span>
+          <span class="group-title">${escapeHtml(hint)}</span>
+          <span class="group-count">${c.length} 条</span>
         </div>
+        <div class="group-items">${groupHtml}</div>
       </div>
     `;
   }).join('');
 
-  // 列表项点击 → 打开详情浮层（点文字区域）
+  // 点击想法 → 打开详情
   ideaList.querySelectorAll('.idea-item .content, .idea-item .meta span').forEach(el => {
     el.style.cursor = 'pointer';
     el.addEventListener('click', (e) => {
@@ -321,7 +290,7 @@ function render() {
     });
   });
 
-  // 关联标签点击
+  // 关联标签点击 → 打开那个
   ideaList.querySelectorAll('.idea-item .links .tag').forEach(tag => {
     tag.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -345,6 +314,33 @@ function render() {
   });
 
   parkBtn.disabled = input.value.trim() === '';
+}
+
+function renderIdeaItem(item) {
+  const time = new Date(item.time);
+  const timeStr = `${time.getMonth()+1}/${time.getDate()} ${String(time.getHours()).padStart(2,'0')}:${String(time.getMinutes()).padStart(2,'0')}`;
+
+  let linkTags = '';
+  if (item.links && item.links.length) {
+    linkTags = `<div class="links">` +
+      item.links.map(lid => {
+        const target = ideas.find(i => i.id === lid);
+        const preview = target ? target.content.slice(0, 15) + (target.content.length > 15 ? '…' : '') : '#已删除';
+        return `<span class="tag" data-target="${lid}">→ #${lid} ${escapeHtml(preview)}</span>`;
+      }).join('') +
+      `</div>`;
+  }
+
+  return `
+    <div class="idea-item" data-id="${item.id}">
+      <div class="content">${escapeHtml(item.content)}</div>
+      ${linkTags}
+      <div class="meta">
+        <span>${timeStr} · #${item.id}</span>
+        <button class="delete" data-id="${item.id}">删除</button>
+      </div>
+    </div>
+  `;
 }
 
 function escapeHtml(str) {
