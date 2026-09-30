@@ -52,6 +52,22 @@
   <span>💡 写完就好，展开是以后的事</span>
 </footer>
 
+<!-- 查看想法详情浮层 -->
+<div id="detailModal" class="modal hidden">
+  <div class="modal-backdrop" id="modalClose"></div>
+  <div class="modal-card">
+    <div class="modal-header">
+      <span id="detailId">#0</span>
+      <button class="modal-close" id="modalCloseBtn">✕</button>
+    </div>
+    <div class="modal-body" id="detailContent"></div>
+    <div class="modal-links" id="detailLinks"></div>
+    <div class="modal-footer">
+      <button id="modalJump" class="primary">跳到这条</button>
+    </div>
+  </div>
+</div>
+
 <!-- 安装提示弹窗 -->
 <div id="installHint" class="hidden" style="position:fixed;bottom:20px;left:20px;right:20px;background:#16213e;border:1px solid #e94560;border-radius:12px;padding:16px;z-index:9999;">
   <div style="font-size:14px;color:#eaeaea;margin-bottom:10px;">
