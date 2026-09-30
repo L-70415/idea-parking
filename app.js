@@ -52,24 +52,28 @@ function computeClusters(allIdeas) {
     clusters.push(cluster);
   });
 
-  // 每个簇内部：关联最多的（簇中心）放最前，其他按时间新到旧
+  // 每个簇内部：按时间新 → 旧
   clusters.forEach(c => {
-    c.sort((a, b) => {
-      const da = (a.links || []).length;
-      const db = (b.links || []).length;
-      if (db !== da) return db - da;
-      return b.id - a.id;
-    });
+    c.sort((a, b) => b.id - a.id);
   });
 
-  // 单个想法（没关联）也自成一组
+  // 单个想法（没关联）也自成一组 → 放到最前面（最新的在最上）
   const singletonIds = new Set();
   clusters.forEach(c => c.forEach(i => singletonIds.add(i.id)));
-  const result = clusters.slice();
+  const singletons = [];
   allIdeas.forEach(i => {
-    if (!singletonIds.has(i.id)) result.push([i]);
+    if (!singletonIds.has(i.id)) singletons.push([i]);
   });
-  return result;
+  singletons.sort((a, b) => b[0].id - a[0].id); // 单条也按时间新到旧
+
+  // 整体排序：簇之间也按"最新成员时间"新→旧
+  const allClusters = clusters.concat(singletons);
+  allClusters.sort((a, b) => {
+    const maxA = Math.max(...a.map(i => i.id));
+    const maxB = Math.max(...b.map(i => i.id));
+    return maxB - maxA;
+  });
+  return allClusters;
 }
 
 // ========== DOM ==========
