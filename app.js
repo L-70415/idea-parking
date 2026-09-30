@@ -223,6 +223,51 @@ exportBtn.addEventListener('click', () => {
   }, 500);
 });
 
+// ========== 导入 ==========
+const importBtn = document.getElementById('importBtn');
+const importFile = document.getElementById('importFile');
+
+importBtn.addEventListener('click', () => importFile.click());
+
+importFile.addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    try {
+      const data = JSON.parse(ev.target.result);
+      if (!Array.isArray(data)) throw new Error('格式不对');
+
+      const mode = confirm(
+        `备份里有 ${data.length} 条想法。\n\n` +
+        `点"确定"= 合并（保留现有 + 加进备份里没有的）\n` +
+        `点"取消"= 覆盖（用备份完全替换当前数据）`
+      );
+
+      if (mode) {
+        // 合并：按 id 去重，保留现有 + 加备份里新增的
+        const existingIds = new Set(ideas.map(i => i.id));
+        data.forEach(item => {
+          if (!existingIds.has(item.id)) ideas.push(item);
+        });
+        alert(`合并完成！现有 ${ideas.length} 条`);
+      } else {
+        ideas = data;
+        alert(`覆盖完成！现在 ${ideas.length} 条`);
+      }
+
+      saveIdeas(ideas);
+      render();
+    } catch (err) {
+      alert('导入失败：文件格式不对。\n应该是导出的 .json 文件。');
+    }
+    // 清空 input，下次能选同一个文件
+    importFile.value = '';
+  };
+  reader.readAsText(file);
+});
+
 // ========== 启动 ==========
 render();
 input.focus();
